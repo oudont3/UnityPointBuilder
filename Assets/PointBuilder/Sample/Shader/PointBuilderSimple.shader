@@ -20,7 +20,38 @@
         ZWrite On
 		
 		CGINCLUDE
-		#include "Quaternion.cginc"
+		
+		float4x4 eulerAnglesToRotationMatrix(float3 angles)
+		{
+			float ch = cos(angles.y); float sh = sin(angles.y); // heading
+			float ca = cos(angles.z); float sa = sin(angles.z); // attitude
+			float cb = cos(angles.x); float sb = sin(angles.x); // bank
+
+			// Ry-Rx-Rz (Yaw Pitch Roll)
+			return float4x4(
+				ch * ca + sh * sb * sa, -ch * sa + sh * sb * ca, sh * cb, 0,
+				cb * sa, cb * ca, -sb, 0,
+				-sh * ca + ch * sb * sa, sh * sa + ch * sb * ca, ch * cb, 0,
+				0, 0, 0, 1
+			);
+		}
+		
+		float3 calcWorldPosition(float4x4 localToWorldMat, float3 wPosition, float3 wEuler)
+		{
+			float3 p = localToWorldMat._14_24_34;
+			float3 s = float3(
+				length(localToWorldMat._11_21_31),
+				length(localToWorldMat._12_22_32),
+				length(localToWorldMat._13_23_33)
+			);
+			float4x4 mat = 0;
+			mat._11_22_33_44 = float4(s, 1.0);
+			float4x4 rotMat = eulerAnglesToRotationMatrix(wEuler);
+			mat = mul(rotMat, mat);
+			mat._14_24_34 += p;
+			return mul(mat, float4(wPosition, 1)).xyz;
+
+		}
 		
 		ENDCG
 		
@@ -37,6 +68,7 @@
         {
 			float3 Position;
 			float3 Normals;
+			float3 EulerAngles;
         };
 
         struct Input
@@ -48,9 +80,13 @@
         half _Metallic;
         fixed4 _Color;
 		
+		// world mat
 		float4x4 _LocalToWorldMat;
+		// world euler
+		float4 _ParentEuler;
+		// local euler
 		float3 _Euler;
-		float4 _ParentQuaternion;
+		// local scale
 		uniform float _Scale;
 		uniform float _NormalOffset;
 
@@ -68,24 +104,28 @@
 			float4 vert = v.vertex;
 		
 			PointData data = _PointDataBuffer[unity_InstanceID];
-			float3 normal = data.Normals;
-			float3 position = data.Position;
-			position = mul(_LocalToWorldMat, float4(position, 1)).xyz;
-			normal = rotate_vector(normal, _ParentQuaternion);
-			// normal = float3(0,0,1); // camera forward
+			float3 parentNormal = data.Normals;
+			float3 parentPosition = data.Position;
+			float3 eulerAngle = data.EulerAngles;
+			
+			// parents 
+			parentPosition = calcWorldPosition(_LocalToWorldMat, parentPosition, _ParentEuler);
+			parentNormal = mul(eulerAnglesToRotationMatrix(_ParentEuler), float4(parentNormal, 1)).xyz;
 
-			float4x4 object2world = (float4x4)0; 
+			// conv matrix
+			float4x4 mat = 0; 
+			// scale
 			float3 scl = _Scale;
-			object2world._11_22_33_44 = float4(scl, 1.0);
+			mat._11_22_33_44 = float4(scl, 1.0);
+			// rotate
+			float4x4 rotMatrix = eulerAnglesToRotationMatrix(eulerAngle + _ParentEuler + _Euler);
+			mat = mul(rotMatrix, mat);
+			// position
+			mat._14_24_34 += parentPosition + parentNormal * _NormalOffset;
+			
+			v.vertex.xyz = mul(mat, v.vertex).xyz;
 
-			float4 q1 = q_look_at(normal, float3(0, 1, 0));
-			float4 q2 = euler_to_quaternion(_Euler);
-			float4 q = qmul(q1, q2);
-			float4x4 rotMatrix = quaternion_to_matrix(q);
-			object2world = mul(rotMatrix, object2world);
-			object2world._14_24_34 += position + normal * _NormalOffset;
-
-			v.vertex.xyz = mul(object2world, vert);
+			v.normal = mul(rotMatrix, float4(v.normal, 1));
         #endif
 
 		}

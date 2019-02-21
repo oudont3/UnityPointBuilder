@@ -11,6 +11,7 @@ namespace EvenIntervalPointBuilder.Sample
         {
             public Vector3 Position;
             public Vector3 Normals;
+            public Vector3 EulerAngles;
         }
 
         public Data.PointData _data;
@@ -28,7 +29,7 @@ namespace EvenIntervalPointBuilder.Sample
 
         private int PROPERTY_ID_POINT_DATA_BUFFER = Shader.PropertyToID("_PointDataBuffer");
         private int PROPERTY_ID_LOCAL_TO_WORLD_MAT = Shader.PropertyToID("_LocalToWorldMat");
-        private int PROPERTY_ID_PARENT_QUATERNION = Shader.PropertyToID("_ParentQuaternion");
+        private int PROPERTY_ID_PARENT_EULER = Shader.PropertyToID("_ParentEuler");
         private int PROPERTY_ID_EULER = Shader.PropertyToID("_Euler");
 
         // Start is called before the first frame update
@@ -64,6 +65,9 @@ namespace EvenIntervalPointBuilder.Sample
                 dataArr[i].Position = _data.points[i];
                 dataArr[i].Normals = _data.normals[i];
 
+                var q = Quaternion.LookRotation(dataArr[i].Normals);
+                dataArr[i].EulerAngles = q.eulerAngles * Mathf.Deg2Rad;
+
             }
             _pointDataBuffer.SetData(dataArr);
 
@@ -73,16 +77,19 @@ namespace EvenIntervalPointBuilder.Sample
         {
             if (_data == null || _data.points.Count <= 0) return;
 
+            if (_parent == null) _parent = transform;
+
             _GPUInstancingArgs[0] = (uint)_drawMesh.GetIndexCount(0);
             _GPUInstancingArgs[1] = (uint)_data.points.Count;
+            _GPUInstancingArgs[2] = (uint)_drawMesh.GetIndexStart(0);
+            _GPUInstancingArgs[3] = (uint)_drawMesh.GetBaseVertex(0);
             _argsBuffer.SetData(_GPUInstancingArgs);
 
             _drawMaterial.SetBuffer(PROPERTY_ID_POINT_DATA_BUFFER, _pointDataBuffer);
             _drawMaterial.SetMatrix(PROPERTY_ID_LOCAL_TO_WORLD_MAT, _parent.localToWorldMatrix);
 
-            var q = new Vector4(_parent.rotation.x, _parent.rotation.y, _parent.rotation.z, _parent.rotation.w);
-            _drawMaterial.SetVector(PROPERTY_ID_PARENT_QUATERNION, q);
-            _drawMaterial.SetVector(PROPERTY_ID_EULER, _drawMeshEuler);
+            _drawMaterial.SetVector(PROPERTY_ID_PARENT_EULER, _parent.rotation.eulerAngles * Mathf.Deg2Rad);
+            _drawMaterial.SetVector(PROPERTY_ID_EULER, _drawMeshEuler * Mathf.Deg2Rad);
 
 
             Graphics.DrawMeshInstancedIndirect(_drawMesh, 0, _drawMaterial, _drawMeshBounds, _argsBuffer);
